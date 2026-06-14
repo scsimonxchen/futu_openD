@@ -9,7 +9,7 @@
     <version>1.0.0</version>
     <packaging>pom</packaging>
 
-    <name>stock-lab</name>
+    <name>futu_openD</name>
     <description>Stock lab workspace with Futu OpenD data collector</description>
 
     <modules>
