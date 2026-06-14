@@ -6,7 +6,7 @@
         <sourceOutputDir name="target/generated-sources/annotations" />
         <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
         <outputRelativeToContentRoot value="true" />
-        <module name="stock-lab-collector" />
+        <module name="futu_openD_data_collector_cli" />
       </profile>
     </annotationProcessing>
   </component>

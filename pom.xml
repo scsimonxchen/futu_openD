@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.stocklab</groupId>
-    <artifactId>stock-lab</artifactId>
+    <artifactId>futu_openD</artifactId>
     <version>1.0.0</version>
     <packaging>pom</packaging>
 
@@ -13,7 +13,7 @@
     <description>Stock lab workspace with Futu OpenD data collector</description>
 
     <modules>
-        <module>stock-lab-collector</module>
+        <module>futu_openD_data_collector_cli</module>
     </modules>
 
     <properties>
