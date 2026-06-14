@@ -31,4 +31,31 @@ public final class KlTypeParser {
                 throw new IllegalArgumentException("Unknown interval: " + interval);
         }
     }
+
+    public static String toInterval(int klTypeNumber) {
+        QotCommon.KLType klType = QotCommon.KLType.forNumber(klTypeNumber);
+        if (klType == null) {
+            return "unknown";
+        }
+        switch (klType) {
+            case KLType_1Min:
+                return "1m";
+            case KLType_5Min:
+                return "5m";
+            case KLType_15Min:
+                return "15m";
+            case KLType_30Min:
+                return "30m";
+            case KLType_60Min:
+                return "60m";
+            case KLType_Day:
+                return "day";
+            case KLType_Week:
+                return "week";
+            case KLType_Month:
+                return "month";
+            default:
+                return "unknown";
+        }
+    }
 }

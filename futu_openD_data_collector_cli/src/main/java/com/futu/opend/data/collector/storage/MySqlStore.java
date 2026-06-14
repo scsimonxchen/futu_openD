@@ -1,25 +1,27 @@
 package com.futu.opend.data.collector.storage;
 
-import com.futu.openapi.pb.QotUpdateBroker;
-import com.futu.openapi.pb.QotUpdateTicker;
-import com.google.protobuf.GeneratedMessageV3;
-import com.futu.opend.data.collector.config.MySqlConfig;
-
 import com.futu.openapi.pb.GetGlobalState;
 import com.futu.openapi.pb.QotCommon;
+import com.futu.openapi.pb.QotGetCapitalFlow;
 import com.futu.openapi.pb.QotGetSecuritySnapshot;
 import com.futu.openapi.pb.QotGetStaticInfo;
 import com.futu.openapi.pb.QotRequestHistoryKL;
+import com.futu.openapi.pb.QotRequestRehab;
 import com.futu.openapi.pb.QotUpdateBasicQot;
+import com.futu.openapi.pb.QotUpdateBroker;
 import com.futu.openapi.pb.QotUpdateKL;
 import com.futu.openapi.pb.QotUpdateOrderBook;
 import com.futu.openapi.pb.QotUpdateRT;
+import com.futu.openapi.pb.QotUpdateTicker;
 import com.futu.openapi.pb.TrdCommon;
 import com.futu.openapi.pb.TrdGetAccList;
 import com.futu.openapi.pb.TrdGetFunds;
 import com.futu.openapi.pb.TrdGetHistoryOrderList;
 import com.futu.openapi.pb.TrdGetOrderList;
 import com.futu.openapi.pb.TrdGetPositionList;
+import com.google.protobuf.GeneratedMessageV3;
+import com.futu.opend.data.collector.config.MySqlConfig;
+import com.futu.opend.data.collector.util.KlTypeParser;
 import com.futu.opend.data.collector.util.SymbolParser;
 
 import java.sql.Connection;
@@ -89,6 +91,30 @@ public class MySqlStore implements DataStore {
                     "fetched_at DATETIME(3), market VARCHAR(16), code VARCHAR(32), side VARCHAR(8), " +
                     "position INT, broker_id BIGINT, broker_name VARCHAR(64), " +
                     "INDEX idx_broker (market, code, fetched_at))");
+            stmt.execute("CREATE TABLE IF NOT EXISTS capital_flow (" +
+                    "fetched_at DATETIME(3), market VARCHAR(16), code VARCHAR(32), period_start VARCHAR(32), " +
+                    "in_flow DOUBLE, main_in_flow DOUBLE, super_in_flow DOUBLE, " +
+                    "s_in_flow DOUBLE, m_in_flow DOUBLE, l_in_flow DOUBLE, " +
+                    "UNIQUE KEY uq_capflow (market, code, period_start))");
+            stmt.execute("CREATE TABLE IF NOT EXISTS rehab_factors (" +
+                    "fetched_at DATETIME(3), market VARCHAR(16), code VARCHAR(32), ex_date VARCHAR(32), " +
+                    "fwd_factor_a DOUBLE, fwd_factor_b DOUBLE, bwd_factor_a DOUBLE, bwd_factor_b DOUBLE, " +
+                    "UNIQUE KEY uq_rehab (market, code, ex_date))");
+            createIndexIfMissing(stmt, "idx_basic_quotes_sym_time",
+                    "basic_quotes", "market, code, fetched_at");
+            createIndexIfMissing(stmt, "idx_orderbook_sym_time",
+                    "orderbook", "market, code, fetched_at");
+            createIndexIfMissing(stmt, "idx_realtime_ticks_sym_time",
+                    "realtime_ticks", "market, code, time_key");
+        }
+    }
+
+    private void createIndexIfMissing(Statement stmt, String indexName, String table, String columns)
+            throws SQLException {
+        try {
+            stmt.execute("CREATE INDEX " + indexName + " ON " + table + " (" + columns + ")");
+        } catch (SQLException ignored) {
+            // Index may already exist
         }
     }
 
@@ -274,7 +300,67 @@ public class MySqlStore implements DataStore {
         if (!rsp.hasS2C()) {
             return;
         }
-        saveKlines(rsp.getS2C().getSecurity(), "push", rsp.getS2C().getKlListList());
+        String interval = rsp.getS2C().hasKlType()
+                ? KlTypeParser.toInterval(rsp.getS2C().getKlType())
+                : "unknown";
+        saveKlines(rsp.getS2C().getSecurity(), interval, rsp.getS2C().getKlListList());
+    }
+
+    @Override
+    public void saveCapitalFlow(QotCommon.Security security, QotGetCapitalFlow.Response rsp) {
+        if (!rsp.hasS2C()) {
+            return;
+        }
+        String sql = "INSERT INTO capital_flow (fetched_at, market, code, period_start, in_flow, main_in_flow, " +
+                "super_in_flow, s_in_flow, m_in_flow, l_in_flow) VALUES (?,?,?,?,?,?,?,?,?,?) " +
+                "ON DUPLICATE KEY UPDATE fetched_at=VALUES(fetched_at), in_flow=VALUES(in_flow), " +
+                "main_in_flow=VALUES(main_in_flow), super_in_flow=VALUES(super_in_flow), " +
+                "s_in_flow=VALUES(s_in_flow), m_in_flow=VALUES(m_in_flow), l_in_flow=VALUES(l_in_flow)";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            for (QotGetCapitalFlow.CapitalFlowItem item : rsp.getS2C().getFlowItemListList()) {
+                ps.setString(1, fetchedAt);
+                ps.setString(2, SymbolParser.marketName(security.getMarket()));
+                ps.setString(3, security.getCode());
+                ps.setString(4, item.hasTime() ? item.getTime() : "");
+                ps.setDouble(5, item.getInFlow());
+                ps.setDouble(6, item.hasMainInFlow() ? item.getMainInFlow() : 0);
+                ps.setDouble(7, item.hasSuperInFlow() ? item.getSuperInFlow() : 0);
+                ps.setDouble(8, item.hasSmlInFlow() ? item.getSmlInFlow() : 0);
+                ps.setDouble(9, item.hasMidInFlow() ? item.getMidInFlow() : 0);
+                ps.setDouble(10, item.hasBigInFlow() ? item.getBigInFlow() : 0);
+                ps.addBatch();
+            }
+            ps.executeBatch();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to save capital flow", e);
+        }
+    }
+
+    @Override
+    public void saveRehabFactors(QotCommon.Security security, QotRequestRehab.Response rsp) {
+        if (!rsp.hasS2C()) {
+            return;
+        }
+        String sql = "INSERT INTO rehab_factors (fetched_at, market, code, ex_date, fwd_factor_a, fwd_factor_b, " +
+                "bwd_factor_a, bwd_factor_b) VALUES (?,?,?,?,?,?,?,?) " +
+                "ON DUPLICATE KEY UPDATE fetched_at=VALUES(fetched_at), fwd_factor_a=VALUES(fwd_factor_a), " +
+                "fwd_factor_b=VALUES(fwd_factor_b), bwd_factor_a=VALUES(bwd_factor_a), bwd_factor_b=VALUES(bwd_factor_b)";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            for (QotCommon.Rehab rehab : rsp.getS2C().getRehabListList()) {
+                ps.setString(1, fetchedAt);
+                ps.setString(2, SymbolParser.marketName(security.getMarket()));
+                ps.setString(3, security.getCode());
+                ps.setString(4, rehab.getTime());
+                ps.setDouble(5, rehab.getFwdFactorA());
+                ps.setDouble(6, rehab.getFwdFactorB());
+                ps.setDouble(7, rehab.getBwdFactorA());
+                ps.setDouble(8, rehab.getBwdFactorB());
+                ps.addBatch();
+            }
+            ps.executeBatch();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to save rehab factors", e);
+        }
     }
 
     @Override

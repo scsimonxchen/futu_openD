@@ -12,7 +12,14 @@
     <name>futu_openD</name>
     <description>Stock lab workspace with Futu OpenD data collector</description>
 
+    <!-- 修改前
     <modules>
+        <module>futu_openD_data_collector_cli</module>
+    </modules>-->
+
+    <!-- 修改后 -->
+    <modules>
+        <module>FTAPI4J_10.7.6708/ftapi4j</module>
         <module>futu_openD_data_collector_cli</module>
     </modules>
 

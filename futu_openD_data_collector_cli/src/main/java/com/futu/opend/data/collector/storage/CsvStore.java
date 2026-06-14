@@ -16,6 +16,9 @@ import com.futu.openapi.pb.TrdGetPositionList;
 import com.futu.openapi.pb.QotUpdateBroker;
 import com.futu.openapi.pb.QotUpdateTicker;
 import com.google.protobuf.GeneratedMessageV3;
+import com.futu.openapi.pb.QotGetCapitalFlow;
+import com.futu.openapi.pb.QotRequestRehab;
+import com.futu.opend.data.collector.util.KlTypeParser;
 import com.futu.opend.data.collector.util.SymbolParser;
 
 import java.io.BufferedWriter;
@@ -111,8 +114,21 @@ public class CsvStore implements DataStore {
     @Override
     public void saveKlinePush(QotUpdateKL.Response rsp) {
         if (rsp.hasS2C()) {
-            saveKlines(rsp.getS2C().getSecurity(), "push", rsp.getS2C().getKlListList());
+            String interval = rsp.getS2C().hasKlType()
+                    ? KlTypeParser.toInterval(rsp.getS2C().getKlType())
+                    : "unknown";
+            saveKlines(rsp.getS2C().getSecurity(), interval, rsp.getS2C().getKlListList());
         }
+    }
+
+    @Override
+    public void saveCapitalFlow(QotCommon.Security security, QotGetCapitalFlow.Response rsp) {
+        // CSV store keeps archive-only normalized data in quote_api_archive via callers
+    }
+
+    @Override
+    public void saveRehabFactors(QotCommon.Security security, QotRequestRehab.Response rsp) {
+        // CSV store keeps archive-only normalized data in quote_api_archive via callers
     }
 
     @Override

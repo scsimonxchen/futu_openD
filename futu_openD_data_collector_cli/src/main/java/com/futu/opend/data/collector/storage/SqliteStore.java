@@ -15,6 +15,9 @@ import com.futu.openapi.pb.TrdGetFunds;
 import com.futu.openapi.pb.TrdGetHistoryOrderList;
 import com.futu.openapi.pb.TrdGetOrderList;
 import com.futu.openapi.pb.TrdGetPositionList;
+import com.futu.openapi.pb.QotGetCapitalFlow;
+import com.futu.openapi.pb.QotRequestRehab;
+import com.futu.opend.data.collector.util.KlTypeParser;
 import com.futu.opend.data.collector.util.SymbolParser;
 
 import java.nio.file.Files;
@@ -76,6 +79,13 @@ public class SqliteStore implements DataStore {
                     "fetched_at TEXT, acc_id INTEGER, is_history INTEGER, order_id TEXT, code TEXT, name TEXT, " +
                     "trd_side INTEGER, order_type INTEGER, order_status INTEGER, qty REAL, price REAL, " +
                     "create_time TEXT, updated_time TEXT)");
+            stmt.execute("CREATE TABLE IF NOT EXISTS capital_flow (" +
+                    "fetched_at TEXT, market TEXT, code TEXT, period_start TEXT, in_flow REAL, main_in_flow REAL, " +
+                    "super_in_flow REAL, s_in_flow REAL, m_in_flow REAL, l_in_flow REAL, " +
+                    "UNIQUE(market, code, period_start))");
+            stmt.execute("CREATE TABLE IF NOT EXISTS rehab_factors (" +
+                    "fetched_at TEXT, market TEXT, code TEXT, ex_date TEXT, fwd_factor_a REAL, fwd_factor_b REAL, " +
+                    "bwd_factor_a REAL, bwd_factor_b REAL, UNIQUE(market, code, ex_date))");
         }
     }
 
@@ -258,7 +268,62 @@ public class SqliteStore implements DataStore {
         if (!rsp.hasS2C()) {
             return;
         }
-        saveKlines(rsp.getS2C().getSecurity(), "push", rsp.getS2C().getKlListList());
+        String interval = rsp.getS2C().hasKlType()
+                ? KlTypeParser.toInterval(rsp.getS2C().getKlType())
+                : "unknown";
+        saveKlines(rsp.getS2C().getSecurity(), interval, rsp.getS2C().getKlListList());
+    }
+
+    @Override
+    public void saveCapitalFlow(QotCommon.Security security, QotGetCapitalFlow.Response rsp) {
+        if (!rsp.hasS2C()) {
+            return;
+        }
+        String sql = "INSERT OR REPLACE INTO capital_flow (fetched_at, market, code, period_start, in_flow, " +
+                "main_in_flow, super_in_flow, s_in_flow, m_in_flow, l_in_flow) VALUES (?,?,?,?,?,?,?,?,?,?)";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            for (QotGetCapitalFlow.CapitalFlowItem item : rsp.getS2C().getFlowItemListList()) {
+                ps.setString(1, fetchedAt);
+                ps.setString(2, SymbolParser.marketName(security.getMarket()));
+                ps.setString(3, security.getCode());
+                ps.setString(4, item.hasTime() ? item.getTime() : "");
+                ps.setDouble(5, item.getInFlow());
+                ps.setDouble(6, item.hasMainInFlow() ? item.getMainInFlow() : 0);
+                ps.setDouble(7, item.hasSuperInFlow() ? item.getSuperInFlow() : 0);
+                ps.setDouble(8, item.hasSmlInFlow() ? item.getSmlInFlow() : 0);
+                ps.setDouble(9, item.hasMidInFlow() ? item.getMidInFlow() : 0);
+                ps.setDouble(10, item.hasBigInFlow() ? item.getBigInFlow() : 0);
+                ps.addBatch();
+            }
+            ps.executeBatch();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to save capital flow", e);
+        }
+    }
+
+    @Override
+    public void saveRehabFactors(QotCommon.Security security, QotRequestRehab.Response rsp) {
+        if (!rsp.hasS2C()) {
+            return;
+        }
+        String sql = "INSERT OR REPLACE INTO rehab_factors (fetched_at, market, code, ex_date, fwd_factor_a, " +
+                "fwd_factor_b, bwd_factor_a, bwd_factor_b) VALUES (?,?,?,?,?,?,?,?)";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            for (QotCommon.Rehab rehab : rsp.getS2C().getRehabListList()) {
+                ps.setString(1, fetchedAt);
+                ps.setString(2, SymbolParser.marketName(security.getMarket()));
+                ps.setString(3, security.getCode());
+                ps.setString(4, rehab.getTime());
+                ps.setDouble(5, rehab.getFwdFactorA());
+                ps.setDouble(6, rehab.getFwdFactorB());
+                ps.setDouble(7, rehab.getBwdFactorA());
+                ps.setDouble(8, rehab.getBwdFactorB());
+                ps.addBatch();
+            }
+            ps.executeBatch();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to save rehab factors", e);
+        }
     }
 
     @Override

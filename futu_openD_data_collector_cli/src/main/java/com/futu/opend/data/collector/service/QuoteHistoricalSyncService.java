@@ -3,6 +3,9 @@ package com.futu.opend.data.collector.service;
 import com.futu.openapi.pb.GetGlobalState;
 import com.futu.openapi.pb.QotCommon;
 import com.futu.openapi.pb.QotGetIpoList;
+import com.futu.openapi.pb.QotGetPlateSet;
+import com.futu.openapi.pb.QotGetStaticInfo;
+import com.futu.openapi.pb.QotGetUserSecurity;
 import com.futu.openapi.pb.QotGetUserSecurityGroup;
 import com.futu.openapi.pb.QotRequestHistoryKLQuota;
 import com.google.protobuf.GeneratedMessageV3;
@@ -43,6 +46,8 @@ public class QuoteHistoricalSyncService {
         QotCommon.RehabType rehabType = parseRehab(rehab);
 
         syncMarketWide(symbols, apiGroups, begin, end);
+        syncMarketScreening(symbols, apiGroups);
+        syncPersonalization(apiGroups);
 
         for (QotCommon.Security sec : symbols) {
             String key = QuoteStorageService.entityKey(sec);
@@ -57,11 +62,11 @@ public class QuoteHistoricalSyncService {
             }
 
             if (apiGroups.contains("all") || apiGroups.contains("rehab")) {
-                syncApi("request_rehab", key,
+                syncApi(sec, "request_rehab", key,
                         client.requestRehab(QuoteRequestBuilders.rehab(sec)));
             }
             if (apiGroups.contains("all") || apiGroups.contains("capital-flow")) {
-                syncApi("get_capital_flow", key,
+                syncApi(sec, "get_capital_flow", key,
                         client.getCapitalFlow(QuoteRequestBuilders.capitalFlow(sec, begin, end)));
             }
             if (apiGroups.contains("all") || apiGroups.contains("capital-distribution")) {
@@ -81,15 +86,18 @@ public class QuoteHistoricalSyncService {
                         client.getReference(QuoteRequestBuilders.reference(sec)));
             }
             if (apiGroups.contains("all") || apiGroups.contains("derivatives")) {
-                syncApi("get_option_expiration_date", key,
+                syncApi(sec, "get_option_expiration_date", key,
                         client.getOptionExpirationDate(QuoteRequestBuilders.optionExpirationDate(sec)));
-                syncApi("get_option_chain", key,
+                syncApi(sec, "get_option_chain", key,
                         client.getOptionChain(QuoteRequestBuilders.optionChain(sec, begin, end)));
-                syncApi("get_warrant", key,
+                syncApi(sec, "get_warrant", key,
                         client.getWarrant(QuoteRequestBuilders.warrant(sec)));
-                syncApi("get_option_volatility", key,
+                syncApi(sec, "get_future_info", key,
+                        client.getFutureInfo(QuoteRequestBuilders.futureInfo(
+                                java.util.Collections.singletonList(sec))));
+                syncApi(sec, "get_option_volatility", key,
                         client.getOptionVolatility(QuoteRequestBuilders.optionVolatility(sec)));
-                syncApi("get_option_exercise_probability", key,
+                syncApi(sec, "get_option_exercise_probability", key,
                         client.getOptionExerciseProbability(QuoteRequestBuilders.optionExerciseProbability(sec)));
             }
             if (apiGroups.contains("all") || apiGroups.contains("financials")) {
@@ -167,6 +175,69 @@ public class QuoteHistoricalSyncService {
         }
     }
 
+    private void syncMarketScreening(List<QotCommon.Security> symbols, Set<String> apiGroups)
+            throws InterruptedException {
+        if (!apiGroups.contains("all") && !apiGroups.contains("market-screening")) {
+            return;
+        }
+        if (symbols.isEmpty()) {
+            return;
+        }
+        String market = SymbolParser.marketName(symbols.get(0).getMarket());
+        System.out.println("Syncing market-screening APIs for " + market + "...");
+        syncApi("stock_filter", market,
+                client.stockFilter(QuoteRequestBuilders.stockFilter(market, 200)));
+        QotGetPlateSet.Response plateSetRsp = client.getPlateSet(
+                QuoteRequestBuilders.plateSet(market, "all"));
+        syncApi("get_plate_set", market, plateSetRsp);
+        if (plateSetRsp.hasS2C() && plateSetRsp.getS2C().getPlateInfoListCount() > 0) {
+            QotCommon.Security plate = plateSetRsp.getS2C().getPlateInfoList(0).getPlate();
+            syncApi("get_plate_security", QuoteStorageService.entityKey(plate),
+                    client.getPlateSecurity(QuoteRequestBuilders.plateSecurity(plate)));
+        }
+        int[] stockTypes = {
+                QotCommon.SecurityType.SecurityType_Eqty_VALUE,
+                QotCommon.SecurityType.SecurityType_Index_VALUE
+        };
+        for (int stockType : stockTypes) {
+            QotGetStaticInfo.Response rsp = client.getStaticInfo(
+                    QuoteRequestBuilders.staticInfo(market, stockType));
+            syncApi("get_static_info", market + ":" + stockType, rsp);
+            sleep();
+        }
+        syncApi("get_ipo_list", market, client.getIpoList(QuoteRequestBuilders.ipoList(market)));
+    }
+
+    private void syncPersonalization(Set<String> apiGroups) throws InterruptedException {
+        if (!apiGroups.contains("all") && !apiGroups.contains("personalization")) {
+            return;
+        }
+        System.out.println("Syncing personalization APIs...");
+        QotGetUserSecurityGroup.Response groupRsp = client.getUserSecurityGroup(
+                QotGetUserSecurityGroup.C2S.newBuilder()
+                        .setGroupType(QotGetUserSecurityGroup.GroupType.GroupType_All_VALUE)
+                        .build());
+        syncApi("get_user_security_group", "global", groupRsp);
+        if (groupRsp.hasS2C()) {
+            for (QotGetUserSecurityGroup.GroupData group : groupRsp.getS2C().getGroupListList()) {
+                if (!group.hasGroupName()) {
+                    continue;
+                }
+                QotGetUserSecurity.Response userSecRsp = client.getUserSecurity(
+                        QuoteRequestBuilders.userSecurity(group.getGroupName()));
+                syncApi("get_user_security", group.getGroupName(), userSecRsp);
+            }
+        }
+        for (String market : Arrays.asList("HK", "US", "SH")) {
+            try {
+                syncApi("get_price_reminder", market,
+                        client.getPriceReminder(QuoteRequestBuilders.priceReminder(market)));
+            } catch (Exception e) {
+                System.out.printf("  get_price_reminder %s: skipped (%s)%n", market, e.getMessage());
+            }
+        }
+    }
+
     private void syncMarketWide(List<QotCommon.Security> symbols, Set<String> apiGroups,
                                 String begin, String end) throws InterruptedException {
         if (!apiGroups.contains("all") && !apiGroups.contains("market-wide")) {
@@ -192,8 +263,17 @@ public class QuoteHistoricalSyncService {
 
     private void syncApi(String apiName, String entityKey, GeneratedMessageV3 response)
             throws InterruptedException {
+        syncApi(null, apiName, entityKey, response);
+    }
+
+    private void syncApi(QotCommon.Security security, String apiName, String entityKey,
+                         GeneratedMessageV3 response) throws InterruptedException {
         try {
-            storage.archiveChecked(apiName, entityKey, response);
+            if (security != null) {
+                storage.archiveChecked(apiName, entityKey, security, response);
+            } else {
+                storage.archiveChecked(apiName, entityKey, response);
+            }
             System.out.printf("  %s: ok%n", apiName);
         } catch (Exception e) {
             System.out.printf("  %s: skipped (%s)%n", apiName, e.getMessage());
@@ -241,6 +321,8 @@ public class QuoteHistoricalSyncService {
         groups.add("short");
         groups.add("trade-date");
         groups.add("market-wide");
+        groups.add("market-screening");
+        groups.add("personalization");
         return groups;
     }
 

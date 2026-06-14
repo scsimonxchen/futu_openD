@@ -13,6 +13,9 @@ import com.futu.openapi.pb.TrdGetFunds;
 import com.futu.openapi.pb.TrdGetHistoryOrderList;
 import com.futu.openapi.pb.TrdGetOrderList;
 import com.futu.openapi.pb.TrdGetPositionList;
+import com.futu.openapi.pb.QotGetCapitalFlow;
+import com.futu.openapi.pb.QotRequestRehab;
+import com.futu.opend.data.collector.util.KlTypeParser;
 import com.futu.opend.data.collector.util.SymbolParser;
 
 import java.util.List;
@@ -69,7 +72,26 @@ public class StdoutStore implements DataStore {
 
     @Override
     public void saveKlinePush(QotUpdateKL.Response rsp) {
-        System.out.println(rsp);
+        if (rsp.hasS2C()) {
+            String interval = rsp.getS2C().hasKlType()
+                    ? KlTypeParser.toInterval(rsp.getS2C().getKlType())
+                    : "unknown";
+            saveKlines(rsp.getS2C().getSecurity(), interval, rsp.getS2C().getKlListList());
+        }
+    }
+
+    @Override
+    public void saveCapitalFlow(QotCommon.Security security, QotGetCapitalFlow.Response rsp) {
+        System.out.printf("capital_flow %s:%s items=%d%n",
+                SymbolParser.marketName(security.getMarket()), security.getCode(),
+                rsp.hasS2C() ? rsp.getS2C().getFlowItemListCount() : 0);
+    }
+
+    @Override
+    public void saveRehabFactors(QotCommon.Security security, QotRequestRehab.Response rsp) {
+        System.out.printf("rehab_factors %s:%s items=%d%n",
+                SymbolParser.marketName(security.getMarket()), security.getCode(),
+                rsp.hasS2C() ? rsp.getS2C().getRehabListCount() : 0);
     }
 
     @Override

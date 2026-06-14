@@ -32,6 +32,10 @@ public class QuoteStreamCommand implements Runnable {
             description = "Also pull getBasicQot/getOrderBook/getTicker every N seconds (0 = push only)")
     int pullIntervalSeconds;
 
+    @Option(names = {"--reconnect"}, defaultValue = "true",
+            description = "Auto-reconnect and re-subscribe on disconnect (default: true)")
+    boolean reconnect;
+
     @Override
     public void run() {
         int code = CommandSupport.runQuote(globals, (client, config, store) -> {
@@ -39,7 +43,7 @@ public class QuoteStreamCommand implements Runnable {
                     CommandSupport.resolveSymbols(symbols, symbolsFile);
             QuoteStorageService storage = new QuoteStorageService(store);
             QuoteRealtimeService realtime = new QuoteRealtimeService(client, storage);
-            realtime.stream(secList, types, durationSeconds, pullIntervalSeconds);
+            realtime.stream(secList, types, durationSeconds, pullIntervalSeconds, reconnect, config);
         });
         if (code != 0) {
             System.exit(code);

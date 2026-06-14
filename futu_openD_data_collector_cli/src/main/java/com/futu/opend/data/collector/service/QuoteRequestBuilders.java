@@ -37,11 +37,25 @@ import com.futu.openapi.pb.QotGetValuationDetail;
 import com.futu.openapi.pb.QotGetValuationPlateStockList;
 import com.futu.openapi.pb.QotGetWarrant;
 import com.futu.openapi.pb.QotRequestRehab;
+import com.futu.openapi.pb.QotGetFutureInfo;
+import com.futu.openapi.pb.QotGetIpoList;
+import com.futu.openapi.pb.QotGetPlateSecurity;
+import com.futu.openapi.pb.QotGetPlateSet;
+import com.futu.openapi.pb.QotGetPriceReminder;
+import com.futu.openapi.pb.QotGetStaticInfo;
+import com.futu.openapi.pb.QotGetUserSecurity;
+import com.futu.openapi.pb.QotModifyUserSecurity;
+import com.futu.openapi.pb.QotSetPriceReminder;
+import com.futu.openapi.pb.QotStockFilter;
+import com.futu.opend.data.collector.util.PlateTypeParser;
+import com.futu.opend.data.collector.util.SymbolParser;
+
 import com.futu.openapi.pb.QotRequestTradeDate;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 
 public final class QuoteRequestBuilders {
     private static final DateTimeFormatter DATE = DateTimeFormatter.ISO_LOCAL_DATE;
@@ -215,6 +229,127 @@ public final class QuoteRequestBuilders {
 
     public static QotGetShortInterest.C2S shortInterest(QotCommon.Security sec) {
         return QotGetShortInterest.C2S.newBuilder().setSecurity(sec).build();
+    }
+
+    public static QotGetPlateSet.C2S plateSet(String market, String plateType) {
+        return QotGetPlateSet.C2S.newBuilder()
+                .setMarket(SymbolParser.parseMarket(market).getNumber())
+                .setPlateSetType(PlateTypeParser.parse(plateType))
+                .build();
+    }
+
+    public static QotGetPlateSecurity.C2S plateSecurity(QotCommon.Security plate) {
+        return QotGetPlateSecurity.C2S.newBuilder().setPlate(plate).build();
+    }
+
+    public static QotGetFutureInfo.C2S futureInfo(List<QotCommon.Security> securities) {
+        return QotGetFutureInfo.C2S.newBuilder().addAllSecurityList(securities).build();
+    }
+
+    public static QotStockFilter.C2S stockFilter(String market, int num) {
+        QotStockFilter.BaseFilter filter = QotStockFilter.BaseFilter.newBuilder()
+                .setFieldName(QotStockFilter.StockField.StockField_CurPrice_VALUE)
+                .setFilterMin(0.01)
+                .setIsNoFilter(false)
+                .build();
+        return QotStockFilter.C2S.newBuilder()
+                .setBegin(0)
+                .setNum(num)
+                .setMarket(SymbolParser.parseMarket(market).getNumber())
+                .addBaseFilterList(filter)
+                .build();
+    }
+
+    public static QotGetUserSecurity.C2S userSecurity(String groupName) {
+        return QotGetUserSecurity.C2S.newBuilder().setGroupName(groupName).build();
+    }
+
+    public static QotModifyUserSecurity.C2S modifyUserSecurity(String groupName, String op,
+                                                                 List<QotCommon.Security> securities) {
+        int modifyOp = parseModifyOp(op);
+        return QotModifyUserSecurity.C2S.newBuilder()
+                .setGroupName(groupName)
+                .setModifyOp(modifyOp)
+                .addAllSecurityList(securities)
+                .build();
+    }
+
+    public static QotSetPriceReminder.C2S setPriceReminder(QotCommon.Security sec, String op, int reminderType,
+                                                           double value, long key, String note) {
+        QotSetPriceReminder.C2S.Builder builder = QotSetPriceReminder.C2S.newBuilder()
+                .setSecurity(sec)
+                .setOp(parseReminderOp(op));
+        if (key > 0) {
+            builder.setKey(key);
+        }
+        if (reminderType > 0) {
+            builder.setReminderType(reminderType);
+        }
+        if (value > 0) {
+            builder.setValue(value);
+        }
+        if (note != null && !note.isEmpty()) {
+            builder.setNote(note);
+        }
+        return builder.build();
+    }
+
+    public static QotGetPriceReminder.C2S priceReminder(String market) {
+        return QotGetPriceReminder.C2S.newBuilder()
+                .setMarket(SymbolParser.parseMarket(market).getNumber())
+                .build();
+    }
+
+    public static QotGetIpoList.C2S ipoList(String market) {
+        return QotGetIpoList.C2S.newBuilder()
+                .setMarket(SymbolParser.parseMarket(market).getNumber())
+                .build();
+    }
+
+    public static QotGetStaticInfo.C2S staticInfo(String market, int secType) {
+        return QotGetStaticInfo.C2S.newBuilder()
+                .setMarket(SymbolParser.parseMarket(market).getNumber())
+                .setSecType(secType)
+                .build();
+    }
+
+    private static int parseModifyOp(String op) {
+        if (op == null) {
+            throw new IllegalArgumentException("--op is required (add or del)");
+        }
+        switch (op.toLowerCase(Locale.ROOT)) {
+            case "add":
+                return QotModifyUserSecurity.ModifyUserSecurityOp.ModifyUserSecurityOp_Add_VALUE;
+            case "del":
+            case "delete":
+                return QotModifyUserSecurity.ModifyUserSecurityOp.ModifyUserSecurityOp_Del_VALUE;
+            default:
+                throw new IllegalArgumentException("Unknown modify op: " + op + ". Use add or del.");
+        }
+    }
+
+    private static int parseReminderOp(String op) {
+        if (op == null) {
+            return QotSetPriceReminder.SetPriceReminderOp.SetPriceReminderOp_Add_VALUE;
+        }
+        switch (op.toLowerCase(Locale.ROOT)) {
+            case "add":
+                return QotSetPriceReminder.SetPriceReminderOp.SetPriceReminderOp_Add_VALUE;
+            case "del":
+            case "delete":
+                return QotSetPriceReminder.SetPriceReminderOp.SetPriceReminderOp_Del_VALUE;
+            case "enable":
+                return QotSetPriceReminder.SetPriceReminderOp.SetPriceReminderOp_Enable_VALUE;
+            case "disable":
+                return QotSetPriceReminder.SetPriceReminderOp.SetPriceReminderOp_Disable_VALUE;
+            case "modify":
+                return QotSetPriceReminder.SetPriceReminderOp.SetPriceReminderOp_Modify_VALUE;
+            case "delall":
+            case "del-all":
+                return QotSetPriceReminder.SetPriceReminderOp.SetPriceReminderOp_DelAll_VALUE;
+            default:
+                throw new IllegalArgumentException("Unknown reminder op: " + op);
+        }
     }
 
     public static String defaultFrom(String from) {

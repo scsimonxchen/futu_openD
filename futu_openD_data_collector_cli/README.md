@@ -2,6 +2,8 @@
 
 CLI application to retrieve market and account data from [Futu OpenD](https://openapi.futunn.com/futu-api-doc/intro/intro.html) using the FTAPI4J SDK. All quote APIs are wrapped via `FutuQuoteClient`; data is persisted to **MySQL** by default for historical analysis and realtime trading.
 
+Part of the [futu_openD](../README.md) workspace. For architecture and package layout, see [PROJECT_STRUCTURE.md](../PROJECT_STRUCTURE.md).
+
 ## Prerequisites
 
 1. Install and start **OpenD** on your machine (default `127.0.0.1:11111`).
@@ -14,7 +16,7 @@ cd FTAPI4J_10.7.6708/ftapi4j
 mvn package -DskipTests
 ```
 
-5. Copy and edit configuration:
+5. Copy and edit configuration (from the repo root):
 
 ```bash
 cp futu_openD_data_collector_cli/src/main/resources/config.properties.example config.properties
@@ -26,21 +28,27 @@ Environment variables override config file values: `OPEND_HOST`, `OPEND_PORT`, `
 
 ## Build
 
-Install the Futu API JAR into your local Maven repository (once per machine):
+From the repo root, build the SDK and collector together (recommended):
+
+```bash
+mvn clean install -DskipTests
+```
+
+Alternatively, install the prebuilt Futu API JAR into your local Maven repository (once per machine):
 
 ```bash
 mvn install:install-file \
   -Dfile=FTAPI4J_10.7.6708/lib/futu-api-10.7.6708.jar \
-  -DgroupId=com.futu.openapi \
+  -DgroupId=com.futunn.openapi \
   -DartifactId=futu-api \
   -Dversion=10.7.6708 \
   -Dpackaging=jar
 ```
 
-Then build the collector:
+Then build only the collector:
 
 ```bash
-mvn package -DskipTests
+mvn package -DskipTests -pl futu_openD_data_collector_cli
 ```
 
 The runnable JAR is at `futu_openD_data_collector_cli/target/stock-lab-collector-1.0.0.jar`.
@@ -73,30 +81,53 @@ java -jar futu_openD_data_collector_cli/target/stock-lab-collector-1.0.0.jar quo
   --apis all
 ```
 
-API groups for `--apis`: `all`, `kline`, `rehab`, `capital-flow`, `financials`, `research`, `valuation`, `corporate-actions`, `shareholders`, `insider`, `company`, `derivatives`, `market-wide`, etc.
+API groups for `--apis`: `all`, `kline`, `rehab`, `capital-flow`, `financials`, `research`, `valuation`, `corporate-actions`, `shareholders`, `insider`, `company`, `derivatives`, `market-wide`, `market-screening`, `personalization`, etc.
+
+Recommended production workflow for model training + trading:
+
+```bash
+# 1. Backfill training data
+java -jar .../stock-lab-collector-1.0.0.jar quote-sync \
+  --symbols HK:00700,US:TSLA --from 2018-01-01 --apis all
+
+# 2. Run persistent realtime collector (auto-reconnect)
+java -jar .../stock-lab-collector-1.0.0.jar quote-stream \
+  --symbols HK:00700,US:TSLA --types basic,rt,orderbook,ticker,broker,kl_1m \
+  --pull-interval 5 --reconnect
+```
 
 ### Realtime streaming (trading)
 
 ```bash
-# Trading-focused stream with all push types + optional pull polling
+# Trading-focused stream with all push types + optional pull polling (auto-reconnect on by default)
 java -jar futu_openD_data_collector_cli/target/stock-lab-collector-1.0.0.jar quote-stream \
   --symbols HK:00700 --types basic,rt,orderbook,ticker,broker,kl_1m \
-  --pull-interval 5 --duration 300
+  --pull-interval 5 --reconnect
 
 # Basic subscribe (same engine, lighter defaults)
 java -jar futu_openD_data_collector_cli/target/stock-lab-collector-1.0.0.jar subscribe \
   --symbols HK:00700 --types basic,rt,kl_1m
+
+# Cancel subscriptions
+java -jar futu_openD_data_collector_cli/target/stock-lab-collector-1.0.0.jar unsubscribe \
+  --symbols HK:00700 --types basic,rt
+java -jar futu_openD_data_collector_cli/target/stock-lab-collector-1.0.0.jar unsubscribe --all
 ```
 
 ### Single API pull
 
 ```bash
 java -jar futu_openD_data_collector_cli/target/stock-lab-collector-1.0.0.jar quote-pull \
-  get-market-state --symbols HK:00700
+  get-capital-flow --symbol US:TSLA --from 2025-01-01 --to 2025-12-31
 
 java -jar futu_openD_data_collector_cli/target/stock-lab-collector-1.0.0.jar quote-pull \
-  get-capital-flow --symbol US:TSLA --from 2025-01-01 --to 2025-12-31
+  get-plate-set --market HK --plate-type industry
+
+java -jar futu_openD_data_collector_cli/target/stock-lab-collector-1.0.0.jar quote-pull \
+  request-history-kl --symbol US:TSLA --from 2020-01-01 --to 2025-12-31 --interval day
 ```
+
+`quote-pull` supports all documented quote APIs including: `get-global-state`, `get-sub-info`, `request-history-kl`, `get-security-snapshot`, `get-static-info`, `stock-filter`, `get-plate-set`, `get-plate-security`, `get-future-info`, `get-user-security`, `modify-user-security`, `set-price-reminder`, `get-price-reminder`, `get-ipo-list`, and all per-symbol fundamental/derivative APIs.
 
 ### Market data (individual commands)
 
@@ -121,7 +152,9 @@ java -jar futu_openD_data_collector_cli/target/stock-lab-collector-1.0.0.jar ord
 
 | Table | Purpose |
 |-------|---------|
-| `klines` | Historical K-lines (upsert by symbol/interval/time) |
+| `klines` | Historical + realtime K-lines (upsert by symbol/interval/time; push uses real interval e.g. `1m`) |
+| `capital_flow` | Normalized daily fund-flow time series for model features |
+| `rehab_factors` | Normalized adjustment factors for backtest alignment |
 | `quote_api_archive` | All other pull API responses (JSON text) |
 | `basic_quotes`, `orderbook`, `realtime_ticks` | Realtime push data |
 | `rt_tickers`, `rt_broker_queue` | Tick-by-tick and broker queue pushes |
@@ -136,6 +169,12 @@ Use `MARKET:CODE` — e.g. `HK:00700`, `US:TSLA`, `SH:600000`, `SZ:000001`.
 ## Notes
 
 - `quote-sync` rate-limits API calls (~300 ms between requests) to respect Futu quotas.
-- `quote-stream` and `subscribe` block until duration elapses or you press Ctrl+C.
+- `quote-stream` supports `--reconnect` (default true) for long-running collection; unsubscribes cleanly on shutdown.
 - Use `--format sqlite` or `--format csv` to fall back to file-based storage without MySQL.
 - Trade commands require a valid unlock password MD5 in config when OpenD enforces trade unlock.
+
+## See also
+
+- [Workspace README](../README.md) — repo overview and quick start
+- [Project structure](../PROJECT_STRUCTURE.md) — architecture and package map
+- [Futu API doc (Chinese)](../doc/Futu-API-Doc-zh-Java.md)

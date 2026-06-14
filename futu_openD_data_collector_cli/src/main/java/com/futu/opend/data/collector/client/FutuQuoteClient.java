@@ -142,6 +142,12 @@ public class FutuQuoteClient implements FTSPI_Conn, FTSPI_Qot {
         }
     }
 
+    public boolean isConnected() {
+        synchronized (qotLock) {
+            return qotConnStatus == ConnStatus.READY;
+        }
+    }
+
     public GetGlobalState.Response getGlobalState(long userId) throws InterruptedException {
         GetGlobalState.C2S c2s = GetGlobalState.C2S.newBuilder().setUserID(userId).build();
         GetGlobalState.Request req = GetGlobalState.Request.newBuilder().setC2S(c2s).build();

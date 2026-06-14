@@ -10,6 +10,7 @@ import com.futu.opend.data.collector.cli.PositionsCommand;
 import com.futu.opend.data.collector.cli.SnapshotCommand;
 import com.futu.opend.data.collector.cli.StaticInfoCommand;
 import com.futu.opend.data.collector.cli.SubscribeCommand;
+import com.futu.opend.data.collector.cli.UnsubscribeCommand;
 import com.futu.opend.data.collector.cli.QuotePullCommand;
 import com.futu.opend.data.collector.cli.QuoteStreamCommand;
 import com.futu.opend.data.collector.cli.QuoteSyncCommand;
@@ -28,6 +29,7 @@ import picocli.CommandLine.Command;
                 StaticInfoCommand.class,
                 OrderBookCommand.class,
                 SubscribeCommand.class,
+                UnsubscribeCommand.class,
                 QuoteSyncCommand.class,
                 QuoteStreamCommand.class,
                 QuotePullCommand.class,

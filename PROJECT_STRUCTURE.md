@@ -60,7 +60,7 @@ com.stocklab.collector/
 
 | Package | Files | Responsibility |
 |---------|-------|----------------|
-| **`cli`** | 17 classes | Commands: `ping`, `snapshot`, `history`, `quote-sync`, `quote-stream`, `subscribe`, `quote-pull`, trade commands (`accounts`, `funds`, `positions`, `orders`), etc. |
+| **`cli`** | 18 classes | Commands: `ping`, `snapshot`, `history`, `quote-sync`, `quote-stream`, `subscribe`, `unsubscribe`, `quote-pull`, trade commands (`accounts`, `funds`, `positions`, `orders`), etc. |
 | **`client`** | `FutuQuoteClient`, `FutuTradeClient`, `PushListener`, … | Low-level OpenD quote/trade API calls and push callbacks |
 | **`service`** | `QuoteHistoricalSyncService`, `QuoteRealtimeService`, `QuoteStorageService`, `QuoteRequestBuilders`, `QuoteApiType` | Orchestrates bulk sync, realtime streaming, and storage |
 | **`storage`** | `DataStore` interface + `MySqlStore`, `SqliteStore`, `CsvStore`, `StdoutStore` | Pluggable output; MySQL auto-creates schema |
@@ -77,6 +77,7 @@ com.stocklab.collector/
 | `StaticInfoCommand.java` | `static-info` |
 | `OrderBookCommand.java` | `orderbook` |
 | `SubscribeCommand.java` | `subscribe` |
+| `UnsubscribeCommand.java` | `unsubscribe` |
 | `QuoteSyncCommand.java` | `quote-sync` |
 | `QuoteStreamCommand.java` | `quote-stream` |
 | `QuotePullCommand.java` | `quote-pull` |
@@ -120,6 +121,7 @@ com.stocklab.collector/
 | `StdoutStore.java` | Console output backend |
 | `OutputFormat.java` | Format enum |
 | `QuoteResponseSerializer.java` | JSON serialization for archive storage |
+| `NormalizedQuoteWriter.java` | Writes normalized rows (capital_flow, rehab_factors) |
 
 ### Config & util
 
@@ -130,6 +132,7 @@ com.stocklab.collector/
 | `util/SymbolParser.java` | Parses `MARKET:CODE` symbols |
 | `util/KlTypeParser.java` | K-line interval parsing |
 | `util/SubTypeParser.java` | Subscription type parsing |
+| `util/PlateTypeParser.java` | Plate set type parsing |
 | `util/TrdMarketParser.java` | Trade market parsing |
 
 ---
@@ -163,7 +166,7 @@ flowchart LR
 |----------|----------|
 | **Connectivity** | `ping` |
 | **Market data** | `snapshot`, `history`, `static-info`, `orderbook` |
-| **Bulk / flexible** | `quote-sync` (historical bulk), `quote-stream` (realtime), `quote-pull` (single API), `subscribe` |
+| **Bulk / flexible** | `quote-sync` (historical bulk), `quote-stream` (realtime), `quote-pull` (single API), `subscribe`, `unsubscribe` |
 | **Trading / account** | `accounts`, `funds`, `positions`, `orders` |
 
 **Global options:** `--config`, `--format` (`mysql` | `sqlite` | `csv` | `stdout`), `--db`
@@ -174,7 +177,9 @@ flowchart LR
 
 | Table | Purpose |
 |-------|---------|
-| `klines` | Historical K-lines (upsert by symbol/interval/time) |
+| `klines` | Historical + realtime K-lines (upsert by symbol/interval/time) |
+| `capital_flow` | Normalized fund-flow time series |
+| `rehab_factors` | Normalized adjustment factors |
 | `quote_api_archive` | All other pull API responses (JSON text) |
 | `basic_quotes`, `orderbook`, `realtime_ticks` | Realtime push data |
 | `rt_tickers`, `rt_broker_queue` | Tick-by-tick and broker queue pushes |
@@ -190,7 +195,7 @@ flowchart LR
 | **`sample/`** | Official demos (quote, trade, MACD strategy, etc.) |
 | **`lib/`** | Expected location for `futu-api-10.7.6708.jar` (installed into local Maven repo) |
 
-The collector depends on this JAR as `com.futu.openapi:futu-api:10.7.6708`.
+The collector depends on this JAR as `com.futunn.openapi:futu-api:10.7.6708`.
 
 ---
 
@@ -213,16 +218,19 @@ The collector depends on this JAR as `com.futu.openapi:futu-api:10.7.6708`.
 ## Build
 
 ```bash
-# Install Futu API JAR (once per machine)
+# Build SDK + collector (recommended)
+mvn clean install -DskipTests
+
+# Or install prebuilt Futu API JAR (once per machine)
 mvn install:install-file \
   -Dfile=FTAPI4J_10.7.6708/lib/futu-api-10.7.6708.jar \
-  -DgroupId=com.futu.openapi \
+  -DgroupId=com.futunn.openapi \
   -DartifactId=futu-api \
   -Dversion=10.7.6708 \
   -Dpackaging=jar
 
-# Build collector
-mvn package -DskipTests
+# Build collector only
+mvn package -DskipTests -pl futu_openD_data_collector_cli
 ```
 
 **Output:** `futu_openD_data_collector_cli/target/stock-lab-collector-1.0.0.jar`
@@ -231,5 +239,6 @@ mvn package -DskipTests
 
 ## Related docs
 
+- [`README.md`](README.md) — workspace overview and quick start
 - [`futu_openD_data_collector_cli/README.md`](futu_openD_data_collector_cli/README.md) — usage and examples
 - [`doc/Futu-API-Doc-zh-Java.md`](doc/Futu-API-Doc-zh-Java.md) — Futu API reference (Chinese)

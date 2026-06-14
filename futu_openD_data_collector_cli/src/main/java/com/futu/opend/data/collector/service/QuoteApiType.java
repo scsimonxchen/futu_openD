@@ -7,6 +7,8 @@ import com.futu.openapi.pb.QotGetKL;
 import com.futu.openapi.pb.QotGetMarketState;
 import com.futu.openapi.pb.QotGetOrderBook;
 import com.futu.openapi.pb.QotGetRT;
+import com.futu.openapi.pb.QotGetSecuritySnapshot;
+import com.futu.openapi.pb.QotGetStaticInfo;
 import com.futu.openapi.pb.QotGetSubInfo;
 import com.futu.openapi.pb.QotGetTicker;
 import com.futu.openapi.pb.QotGetUserSecurityGroup;
@@ -15,7 +17,9 @@ import com.google.protobuf.GeneratedMessageV3;
 import com.futu.opend.data.collector.client.FutuQuoteClient;
 import com.futu.opend.data.collector.config.AppConfig;
 import com.futu.opend.data.collector.util.KlTypeParser;
+import com.futu.opend.data.collector.util.SymbolParser;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -24,14 +28,27 @@ public enum QuoteApiType {
     GET_SUB_INFO("get-sub-info", Scope.GLOBAL),
     REQUEST_HISTORY_KL_QUOTA("request-history-kl-quota", Scope.GLOBAL),
     GET_USER_SECURITY_GROUP("get-user-security-group", Scope.GLOBAL),
+    STOCK_FILTER("stock-filter", Scope.GLOBAL),
+    GET_PLATE_SET("get-plate-set", Scope.GLOBAL),
+    GET_PLATE_SECURITY("get-plate-security", Scope.GLOBAL),
+    GET_USER_SECURITY("get-user-security", Scope.GLOBAL),
+    MODIFY_USER_SECURITY("modify-user-security", Scope.GLOBAL),
+    GET_PRICE_REMINDER("get-price-reminder", Scope.GLOBAL),
+    GET_IPO_LIST("get-ipo-list", Scope.GLOBAL),
+    GET_STATIC_INFO("get-static-info", Scope.GLOBAL),
 
     GET_MARKET_STATE("get-market-state", Scope.SYMBOLS),
     GET_BASIC_QOT("get-basic-qot", Scope.SYMBOLS),
+    GET_SECURITY_SNAPSHOT("get-security-snapshot", Scope.SYMBOLS),
+    GET_FUTURE_INFO("get-future-info", Scope.SYMBOLS),
+    REQUEST_HISTORY_KL("request-history-kl", Scope.SYMBOL),
+
     GET_ORDER_BOOK("get-order-book", Scope.SYMBOL),
     GET_KL("get-kl", Scope.SYMBOL),
     GET_RT("get-rt", Scope.SYMBOL),
     GET_TICKER("get-ticker", Scope.SYMBOL),
     GET_BROKER("get-broker", Scope.SYMBOL),
+    SET_PRICE_REMINDER("set-price-reminder", Scope.SYMBOL),
 
     REQUEST_REHAB("request-rehab", Scope.SYMBOL),
     GET_CAPITAL_FLOW("get-capital-flow", Scope.SYMBOL),
@@ -134,6 +151,57 @@ public enum QuoteApiType {
                                 .setGroupType(QotGetUserSecurityGroup.GroupType.GroupType_All_VALUE)
                                 .build()));
                 break;
+            case STOCK_FILTER:
+                requireMarket(ctx);
+                storage.archiveChecked(cliName, ctx.market,
+                        client.stockFilter(QuoteRequestBuilders.stockFilter(ctx.market, ctx.num)));
+                break;
+            case GET_PLATE_SET:
+                requireMarket(ctx);
+                storage.archiveChecked(cliName, ctx.market,
+                        client.getPlateSet(QuoteRequestBuilders.plateSet(ctx.market, ctx.plateType)));
+                break;
+            case GET_PLATE_SECURITY:
+                requirePlateCode(ctx);
+                QotCommon.Security plate = SymbolParser.parse(ctx.plateCode);
+                storage.archiveChecked(cliName, ctx.plateCode,
+                        client.getPlateSecurity(QuoteRequestBuilders.plateSecurity(plate)));
+                break;
+            case GET_USER_SECURITY:
+                requireGroupName(ctx);
+                storage.archiveChecked(cliName, ctx.groupName,
+                        client.getUserSecurity(QuoteRequestBuilders.userSecurity(ctx.groupName)));
+                break;
+            case MODIFY_USER_SECURITY:
+                requireGroupName(ctx);
+                List<QotCommon.Security> modifyTargets = ctx.getTargets(this);
+                storage.archiveChecked(cliName, ctx.groupName,
+                        client.modifyUserSecurity(
+                                QuoteRequestBuilders.modifyUserSecurity(ctx.groupName, ctx.op, modifyTargets)));
+                break;
+            case GET_PRICE_REMINDER:
+                requireMarket(ctx);
+                storage.archiveChecked(cliName, ctx.market,
+                        client.getPriceReminder(QuoteRequestBuilders.priceReminder(ctx.market)));
+                break;
+            case GET_IPO_LIST:
+                requireMarket(ctx);
+                storage.archiveChecked(cliName, ctx.market,
+                        client.getIpoList(QuoteRequestBuilders.ipoList(ctx.market)));
+                break;
+            case GET_STATIC_INFO:
+                requireMarket(ctx);
+                pullStaticInfo(client, storage, ctx);
+                break;
+            case GET_SECURITY_SNAPSHOT:
+                pullSnapshots(client, storage, ctx);
+                break;
+            case GET_FUTURE_INFO:
+                pullFutureInfo(client, storage, ctx);
+                break;
+            case REQUEST_HISTORY_KL:
+                pullHistoryKlines(client, storage, ctx);
+                break;
             default:
                 pullSymbolScoped(client, storage, ctx);
         }
@@ -149,9 +217,76 @@ public enum QuoteApiType {
         for (QotCommon.Security sec : targets) {
             String key = QuoteStorageService.entityKey(sec);
             GeneratedMessageV3 rsp = fetch(client, sec, begin, end, ctx);
-            storage.archiveChecked(cliName, key, rsp);
+            storage.archiveChecked(cliName, key, sec, rsp);
             System.out.printf("Pulled %s for %s%n", cliName, key);
         }
+    }
+
+    private void pullHistoryKlines(FutuQuoteClient client,
+                                   QuoteStorageService storage,
+                                   PullContext ctx) throws InterruptedException {
+        QotCommon.Security sec = ctx.getTargets(this).get(0);
+        String begin = QuoteRequestBuilders.defaultFrom(ctx.from);
+        String end = QuoteRequestBuilders.defaultTo(ctx.to);
+        QotCommon.KLType klType = KlTypeParser.parse(ctx.interval);
+        QotCommon.RehabType rehabType = parseRehab(ctx.rehab);
+        List<QotCommon.KLine> klines = storage.fetchAllHistoryKlines(
+                client, sec, klType, rehabType, begin, end);
+        storage.saveKlines(sec, ctx.interval, klines);
+        System.out.printf("Pulled request-history-kl for %s (%d bars)%n",
+                QuoteStorageService.entityKey(sec), klines.size());
+    }
+
+    private void pullSnapshots(FutuQuoteClient client,
+                               QuoteStorageService storage,
+                               PullContext ctx) throws InterruptedException {
+        List<QotCommon.Security> all = ctx.getTargets(this);
+        List<QotGetSecuritySnapshot.Snapshot> collected = new ArrayList<>();
+        for (int i = 0; i < all.size(); i += 200) {
+            int end = Math.min(i + 200, all.size());
+            List<QotCommon.Security> batch = all.subList(i, end);
+            QotGetSecuritySnapshot.Response rsp = client.getSecuritySnapshot(batch);
+            storage.archiveChecked(cliName, "batch-" + i, rsp);
+            FutuQuoteClient.checkSuccess(rsp);
+            collected.addAll(rsp.getS2C().getSnapshotListList());
+            if (end < all.size()) {
+                Thread.sleep(3000);
+            }
+        }
+        storage.saveSnapshots(collected);
+        System.out.printf("Pulled get-security-snapshot (%d snapshots)%n", collected.size());
+    }
+
+    private void pullFutureInfo(FutuQuoteClient client,
+                                QuoteStorageService storage,
+                                PullContext ctx) throws InterruptedException {
+        List<QotCommon.Security> targets = ctx.getTargets(this);
+        GeneratedMessageV3 rsp = client.getFutureInfo(QuoteRequestBuilders.futureInfo(targets));
+        storage.archiveChecked(cliName, "futures", rsp);
+        System.out.printf("Pulled get-future-info for %d symbol(s)%n", targets.size());
+    }
+
+    private void pullStaticInfo(FutuQuoteClient client,
+                                QuoteStorageService storage,
+                                PullContext ctx) throws InterruptedException {
+        int[] stockTypes = {
+                QotCommon.SecurityType.SecurityType_Eqty_VALUE,
+                QotCommon.SecurityType.SecurityType_Index_VALUE,
+                QotCommon.SecurityType.SecurityType_Trust_VALUE,
+                QotCommon.SecurityType.SecurityType_Warrant_VALUE,
+                QotCommon.SecurityType.SecurityType_Bond_VALUE
+        };
+        List<QotCommon.SecurityStaticInfo> all = new ArrayList<>();
+        for (int stockType : stockTypes) {
+            QotGetStaticInfo.C2S c2s = QuoteRequestBuilders.staticInfo(ctx.market, stockType);
+            QotGetStaticInfo.Response rsp = client.getStaticInfo(c2s);
+            storage.archiveChecked(cliName, ctx.market + ":" + stockType, rsp);
+            FutuQuoteClient.checkSuccess(rsp);
+            all.addAll(rsp.getS2C().getStaticInfoListList());
+            Thread.sleep(1000);
+        }
+        storage.saveStaticInfo(all);
+        System.out.printf("Pulled get-static-info for %s (%d records)%n", ctx.market, all.size());
     }
 
     private GeneratedMessageV3 fetch(FutuQuoteClient client,
@@ -180,6 +315,9 @@ public enum QuoteApiType {
                         .setSecurity(sec).setMaxRetNum(ctx.num).build());
             case GET_BROKER:
                 return client.getBroker(QotGetBroker.C2S.newBuilder().setSecurity(sec).build());
+            case SET_PRICE_REMINDER:
+                return client.setPriceReminder(QuoteRequestBuilders.setPriceReminder(
+                        sec, ctx.op, ctx.reminderType, ctx.reminderValue, ctx.reminderKey, ctx.reminderNote));
             case REQUEST_REHAB:
                 return client.requestRehab(QuoteRequestBuilders.rehab(sec));
             case GET_CAPITAL_FLOW:
@@ -257,6 +395,24 @@ public enum QuoteApiType {
         }
     }
 
+    private static void requireMarket(PullContext ctx) {
+        if (ctx.market == null || ctx.market.isEmpty()) {
+            throw new IllegalArgumentException("Requires --market");
+        }
+    }
+
+    private static void requirePlateCode(PullContext ctx) {
+        if (ctx.plateCode == null || ctx.plateCode.isEmpty()) {
+            throw new IllegalArgumentException("Requires --plate-code");
+        }
+    }
+
+    private static void requireGroupName(PullContext ctx) {
+        if (ctx.groupName == null || ctx.groupName.isEmpty()) {
+            throw new IllegalArgumentException("Requires --group-name");
+        }
+    }
+
     private static QotCommon.RehabType parseRehab(String rehab) {
         if (rehab == null) {
             return QotCommon.RehabType.RehabType_Forward;
@@ -279,6 +435,15 @@ public enum QuoteApiType {
         public final String interval;
         public final String rehab;
         public final int num;
+        public final String market;
+        public final String plateCode;
+        public final String plateType;
+        public final String groupName;
+        public final String op;
+        public final int reminderType;
+        public final double reminderValue;
+        public final long reminderKey;
+        public final String reminderNote;
 
         public PullContext(List<QotCommon.Security> symbols,
                            QotCommon.Security singleSymbol,
@@ -286,7 +451,16 @@ public enum QuoteApiType {
                            String to,
                            String interval,
                            String rehab,
-                           int num) {
+                           int num,
+                           String market,
+                           String plateCode,
+                           String plateType,
+                           String groupName,
+                           String op,
+                           int reminderType,
+                           double reminderValue,
+                           long reminderKey,
+                           String reminderNote) {
             this.symbols = symbols;
             this.singleSymbol = singleSymbol;
             this.from = from;
@@ -294,6 +468,15 @@ public enum QuoteApiType {
             this.interval = interval;
             this.rehab = rehab;
             this.num = num;
+            this.market = market;
+            this.plateCode = plateCode;
+            this.plateType = plateType;
+            this.groupName = groupName;
+            this.op = op;
+            this.reminderType = reminderType;
+            this.reminderValue = reminderValue;
+            this.reminderKey = reminderKey;
+            this.reminderNote = reminderNote;
         }
 
         public List<QotCommon.Security> getTargets(QuoteApiType type) {

@@ -12,6 +12,8 @@ import com.futu.openapi.pb.QotUpdateTicker;
 import com.google.protobuf.GeneratedMessageV3;
 import com.futu.opend.data.collector.client.FutuQuoteClient;
 import com.futu.opend.data.collector.storage.DataStore;
+import com.futu.opend.data.collector.storage.NormalizedQuoteWriter;
+import com.futu.opend.data.collector.util.KlTypeParser;
 import com.futu.opend.data.collector.util.SymbolParser;
 
 import java.util.ArrayList;
@@ -31,6 +33,13 @@ public class QuoteStorageService {
     public void archiveChecked(String apiName, String entityKey, GeneratedMessageV3 response) {
         FutuQuoteClient.checkSuccess(response);
         archive(apiName, entityKey, response);
+    }
+
+    public void archiveChecked(String apiName, String entityKey,
+                               QotCommon.Security security, GeneratedMessageV3 response) {
+        FutuQuoteClient.checkSuccess(response);
+        archive(apiName, entityKey, response);
+        NormalizedQuoteWriter.writeIfSupported(store, apiName, security, response);
     }
 
     public void saveKlines(QotCommon.Security sec, String interval, List<QotCommon.KLine> klines) {
@@ -56,7 +65,13 @@ public class QuoteStorageService {
     }
 
     public void savePushKl(QotUpdateKL.Response rsp) {
-        store.saveKlinePush(rsp);
+        if (!rsp.hasS2C()) {
+            return;
+        }
+        String interval = rsp.getS2C().hasKlType()
+                ? KlTypeParser.toInterval(rsp.getS2C().getKlType())
+                : "unknown";
+        store.saveKlines(rsp.getS2C().getSecurity(), interval, rsp.getS2C().getKlListList());
     }
 
     public void savePushTicker(QotUpdateTicker.Response rsp) {

@@ -10,6 +10,8 @@ import com.futu.openapi.pb.QotUpdateBroker;
 import com.futu.openapi.pb.QotUpdateKL;
 import com.futu.openapi.pb.QotUpdateOrderBook;
 import com.futu.openapi.pb.QotUpdateRT;
+import com.futu.openapi.pb.QotGetCapitalFlow;
+import com.futu.openapi.pb.QotRequestRehab;
 import com.futu.openapi.pb.QotUpdateTicker;
 import com.futu.openapi.pb.TrdCommon;
 import com.futu.openapi.pb.TrdGetAccList;
@@ -58,6 +60,10 @@ public interface DataStore extends Closeable {
     void saveTickerPush(QotUpdateTicker.Response rsp);
 
     void saveBrokerPush(QotUpdateBroker.Response rsp);
+
+    void saveCapitalFlow(QotCommon.Security security, QotGetCapitalFlow.Response rsp);
+
+    void saveRehabFactors(QotCommon.Security security, QotRequestRehab.Response rsp);
 
     static DataStore open(Path dbPath, OutputFormat format) {
         return open(dbPath, format, null);
