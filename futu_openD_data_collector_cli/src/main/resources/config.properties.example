@@ -20,6 +20,6 @@ rsa.key.file=
 # MySQL storage (default --format mysql)
 mysql.host=127.0.0.1
 mysql.port=3306
-mysql.database=stock_lab
+mysql.database=futu_openD
 mysql.user=root
-mysql.password=
+mysql.password=root123!
